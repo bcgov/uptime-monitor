@@ -257,12 +257,49 @@ export const update = async (shouldCommit = false) => {
       }
     };
 
-    let { result, responseTime, status } = await performTestOnce();
+    const performManualCheck = async (): Promise<{
+      result: {
+        httpCode: number;
+      };
+      responseTime: string;
+      status: "up" | "down" | "degraded";
+    }> => {
+        let status: "up" | "down" | "degraded" = "up";
+        let code = 200;
+
+        const labels = ['status-switch', 'status', slug]
+
+        let relevantIssues: Array<any> = [];
+
+        for (const label of labels) {
+          const labeledIssues = await octokit.issues.listForRepo({
+            owner,
+            repo,
+            state: "open",
+            filter: "all",
+            sort: "created",
+            direction: "desc",
+            labels: label,
+          });
+          relevantIssues.push(labeledIssues.data.map(i => i.html_url));
+        };
+
+        const allLabelsMatchedIssues = relevantIssues.reduce((a, b) => a.filter((c: String) => b.includes(c)));
+
+        if (allLabelsMatchedIssues.length) {
+          status = "down";
+          code = 418;
+        }
+
+        return { result: { httpCode: code }, responseTime: (0).toFixed(0), status };
+    };
+
+    let { result, responseTime, status } = !site.isManualCheck ? await performTestOnce() : await performManualCheck();
     /**
      * If the site is down, we perform the test 2 more times to make
      * sure that it's not a false alarm
      */
-    if (status === "down" || status === "degraded") {
+    if (!site.isManualCheck && (status === "down" || status === "degraded")) {
       wait(1000);
       const secondTry = await performTestOnce();
       if (secondTry.status === "up") {
@@ -448,6 +485,66 @@ generator: Upptime <https://github.com/upptime/upptime>
         }
       } else {
         console.log("Skipping commit, ", "status is", status);
+        if (status === "down" || status === "degraded") {
+
+          const currentIssues = await octokit.issues.listForRepo({
+            owner,
+            repo,
+            labels: slug,
+            filter: "all",
+            state: "open",
+            sort: "created",
+            direction: "desc",
+            per_page: 1,
+          });
+
+          // length of currentIssues is at most 1
+          if (currentIssues.data.length) {
+
+            for (const issue of currentIssues.data) {
+
+              let relevantIssues: Array<any> = [];
+
+              for (const label of site.labels) {
+                const labeledIssues = await octokit.issues.listForRepo({
+                  owner: site.owner,
+                  repo: site.repo,
+                  state: "open",
+                  filter: "all",
+                  since: issue.created_at,
+                  sort: "created",
+                  direction: "desc",
+                  labels: label,
+                });
+                relevantIssues.push(labeledIssues.data.map(i => i.html_url));
+              };
+
+              const allLabelsMatchedIssues = relevantIssues.reduce((a, b) => a.filter((c: String) => b.includes(c)));
+
+              const comments = await octokit.issues.listComments({
+                owner,
+                repo,
+                issue_number: issue.number,
+               });
+
+              const commentBodies = comments.data.map((i: any) => i.body);
+              const missing = allLabelsMatchedIssues.filter((i: String) => commentBodies.indexOf(i) < 0);
+
+              console.log("Add missing tagged issues to comments");
+              if (missing.length) {
+                for (const c of missing) {
+                  console.log(c)
+                  await octokit.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: issue.number,
+                    body: c,
+                  });
+                }
+              }
+            }
+          }
+        }
       }
     } catch (error) {
       console.log("ERROR", error);
