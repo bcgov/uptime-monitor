@@ -7,6 +7,9 @@ export interface UpptimeConfig {
         method?: string;
         name: string;
         url: string;
+        owner: string;
+        repo: string;
+        labels: string[];
         port?: number;
         expectedStatusCodes?: number[];
         assignees?: string[];
@@ -17,6 +20,7 @@ export interface UpptimeConfig {
         icon?: string;
         maxResponseTime?: number;
         maxRedirects?: number;
+        isManualCheck?: boolean;
         __dangerous__insecure?: boolean;
         __dangerous__disable_verify_peer?: boolean;
         __dangerous__disable_verify_host?: boolean;
